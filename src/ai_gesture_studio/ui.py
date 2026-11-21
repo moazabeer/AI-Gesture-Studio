@@ -15,6 +15,8 @@ from PyQt6.QtGui import QImage, QPixmap
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
+from gesture_recognizer import recognize_gesture
+
 
 # Project configuration
 MODEL_PATH = Path(__file__).resolve().parents[2] / "hand_landmarker.task"
@@ -28,23 +30,6 @@ CONNECTIONS = [
     (0, 17)
 ]
 
-
-def recognize_gesture(hand):
-    index = hand[8].y < hand[6].y
-    middle = hand[12].y < hand[10].y
-    ring = hand[16].y < hand[14].y
-    pinky = hand[20].y < hand[18].y
-
-    if index and middle and ring and pinky:
-        return "Open Palm"
-
-    if not index and not middle and not ring and not pinky:
-        return "Fist"
-
-    if index and middle and not ring and not pinky:
-        return "Peace Sign"
-
-    return "Unknown"
 
 
 class GestureStudio(QMainWindow):
