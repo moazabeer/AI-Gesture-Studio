@@ -1,3 +1,4 @@
-opencv-python
-mediapipe
-PyQt6
+mediapipe==1.2.3
+numpy==2.5.5
+opencv-python==5.1.0.95
+PyQt6==6.12.1
