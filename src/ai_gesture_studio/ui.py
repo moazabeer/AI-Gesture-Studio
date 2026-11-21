@@ -7,11 +7,13 @@ from PyQt6.QtWidgets import (
     QLabel, QPushButton, QVBoxLayout,
     QHBoxLayout, QTextEdit
 )
+
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QImage, QPixmap
 
 from gesture_recognizer import recognize_gesture
 from hand_tracker import HandTracker
+from mouse_controller import MouseController
 
 
 class GestureStudio(QMainWindow):
@@ -25,11 +27,14 @@ class GestureStudio(QMainWindow):
         self.cap = None
         self.tracker = None
 
+        self.mouse = MouseController(smoothing=0.45)
+
         self.current_gesture = "None"
         self.app_status = "WAITING"
 
         self.candidate = None
         self.stable_frames = 0
+        self.no_hand_frames = 0
 
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_camera)
@@ -52,7 +57,10 @@ class GestureStudio(QMainWindow):
         subtitle = QLabel(
             "Real-Time Hand Tracking & Gesture Recognition"
         )
-        subtitle.setStyleSheet("color: #AAAAAA; font-size: 13px;")
+
+        subtitle.setStyleSheet(
+            "color: #AAAAAA; font-size: 13px;"
+        )
 
         main_layout.addWidget(title)
         main_layout.addWidget(subtitle)
@@ -63,6 +71,7 @@ class GestureStudio(QMainWindow):
         self.camera_label = QLabel("Camera is stopped")
         self.camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.camera_label.setMinimumSize(600, 400)
+
         self.camera_label.setStyleSheet(
             "background-color: #111827;"
             "color: #AAAAAA;"
@@ -77,8 +86,13 @@ class GestureStudio(QMainWindow):
 
         self.gesture_label = QLabel("Gesture: None")
         self.status_label = QLabel("Status: WAITING")
+        self.hand_count_label = QLabel("Hands detected: 0")
 
-        for label in [self.gesture_label, self.status_label]:
+        for label in [
+            self.gesture_label,
+            self.status_label,
+            self.hand_count_label
+        ]:
             label.setStyleSheet(
                 "background-color: #1E293B;"
                 "color: white;"
@@ -98,6 +112,7 @@ class GestureStudio(QMainWindow):
 
         content.addLayout(camera_panel, 3)
         content.addLayout(info_panel, 1)
+
         main_layout.addLayout(content)
 
         controls = QHBoxLayout()
@@ -125,6 +140,41 @@ class GestureStudio(QMainWindow):
 
         main_layout.addLayout(controls)
 
+        mouse_controls = QHBoxLayout()
+
+        self.mouse_enable_button = QPushButton("ENABLE MOUSE")
+        self.mouse_disable_button = QPushButton("DISABLE MOUSE")
+
+        self.mouse_status_label = QLabel("Mouse: DISABLED")
+        self.click_status_label = QLabel("Click: READY")
+
+        self.mouse_enable_button.clicked.connect(
+            self.enable_mouse
+        )
+
+        self.mouse_disable_button.clicked.connect(
+            self.disable_mouse
+        )
+
+        self.mouse_disable_button.setEnabled(False)
+
+        self.mouse_enable_button.setStyleSheet(
+            "background-color: #087E5B; color: white;"
+            "padding: 12px; border-radius: 7px; font-weight: bold;"
+        )
+
+        self.mouse_disable_button.setStyleSheet(
+            "background-color: #B83232; color: white;"
+            "padding: 12px; border-radius: 7px; font-weight: bold;"
+        )
+
+        mouse_controls.addWidget(self.mouse_enable_button)
+        mouse_controls.addWidget(self.mouse_disable_button)
+        mouse_controls.addWidget(self.mouse_status_label)
+        mouse_controls.addWidget(self.click_status_label)
+
+        main_layout.addLayout(mouse_controls)
+
         self.setStyleSheet(
             "QMainWindow { background-color: #0B1120; }"
             "QLabel { color: white; }"
@@ -132,6 +182,7 @@ class GestureStudio(QMainWindow):
         )
 
     def add_log(self, message):
+
         self.log.append(
             time.strftime("%H:%M:%S") + " - " + message
         )
@@ -141,15 +192,35 @@ class GestureStudio(QMainWindow):
         try:
             self.tracker = HandTracker()
 
-            self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+            self.cap = cv2.VideoCapture(
+                0,
+                cv2.CAP_DSHOW
+            )
 
             if not self.cap.isOpened():
                 raise RuntimeError("Camera could not open.")
 
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+
+            actual_width = int(
+                self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+            )
+
+            actual_height = int(
+                self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+            )
+
+            self.add_log(
+                f"Camera resolution: {actual_width}x{actual_height}"
+            )
+
             self.current_gesture = "None"
             self.app_status = "WAITING"
+
             self.candidate = None
             self.stable_frames = 0
+            self.no_hand_frames = 0
 
             self.timer.start(30)
 
@@ -159,6 +230,7 @@ class GestureStudio(QMainWindow):
             self.add_log("Camera started successfully.")
 
         except Exception as error:
+
             self.add_log(f"ERROR: {error}")
             self.stop_camera()
 
@@ -178,23 +250,86 @@ class GestureStudio(QMainWindow):
 
         results = self.tracker.process_frame(frame)
 
+        hands = results.hand_landmarks or []
+
         detected = "None"
 
-        if results.hand_landmarks:
+        self.hand_count_label.setText(
+            f"Hands detected: {len(hands)}"
+        )
 
-            hand = results.hand_landmarks[0]
+        if hands:
 
-            detected = recognize_gesture(hand)
+            self.no_hand_frames = 0
 
-            self.tracker.draw_landmarks(frame, hand)
+            # Draw every detected hand
+            for detected_hand in hands:
+                self.tracker.draw_landmarks(
+                    frame,
+                    detected_hand
+                )
 
+            # Find the largest hand
+            def hand_area(hand):
+
+                xs = [point.x for point in hand]
+                ys = [point.y for point in hand]
+
+                return (
+                    (max(xs) - min(xs))
+                    * (max(ys) - min(ys))
+                )
+
+            selected_hand = max(
+                hands,
+                key=hand_area
+            )
+
+            detected = recognize_gesture(selected_hand)
+
+            # Mouse movement follows the selected hand
+            index_tip = selected_hand[8]
+
+            self.mouse.move_cursor(
+                index_tip.x,
+                index_tip.y
+            )
+            # Pinch-to-click detection
+            thumb_tip = selected_hand[4]
+
+            clicked = self.mouse.pinch_to_click(
+            thumb_tip,
+            index_tip
+            )
+
+            if clicked:
+                self.add_log("Left mouse click detected.")
+
+        else:
+
+            self.no_hand_frames += 1
+
+            # Reset gesture after brief detection loss
+            if self.no_hand_frames >= 5:
+
+                self.candidate = None
+                self.stable_frames = 0
+
+                if self.current_gesture != "None":
+
+                    self.current_gesture = "None"
+                    self.app_status = "WAITING"
+
+        # Gesture stability
         if detected == self.candidate:
             self.stable_frames += 1
+
         else:
             self.candidate = detected
             self.stable_frames = 1
 
         if self.stable_frames >= 5:
+
             if detected != self.current_gesture:
 
                 self.current_gesture = detected
@@ -239,7 +374,7 @@ class GestureStudio(QMainWindow):
             frame.shape[0],
             frame.strides[0],
             QImage.Format.Format_BGR888
-        )
+        ).copy()
 
         pixmap = QPixmap.fromImage(image)
 
@@ -251,9 +386,40 @@ class GestureStudio(QMainWindow):
             )
         )
 
+    def enable_mouse(self):
+
+        if self.cap is None or self.tracker is None:
+
+            self.add_log(
+                "Start camera before enabling mouse."
+            )
+            return
+
+        self.mouse.enable()
+
+        self.mouse_enable_button.setEnabled(False)
+        self.mouse_disable_button.setEnabled(True)
+
+        self.mouse_status_label.setText("Mouse: ENABLED")
+
+        self.add_log("Mouse control enabled.")
+
+    def disable_mouse(self):
+
+        self.mouse.disable()
+
+        self.mouse_enable_button.setEnabled(True)
+        self.mouse_disable_button.setEnabled(False)
+
+        self.mouse_status_label.setText("Mouse: DISABLED")
+
+        self.add_log("Mouse control disabled.")
+
     def stop_camera(self):
 
         self.timer.stop()
+
+        self.disable_mouse()
 
         if self.cap is not None:
             self.cap.release()
@@ -272,11 +438,17 @@ class GestureStudio(QMainWindow):
         self.current_gesture = "None"
         self.app_status = "WAITING"
 
+        self.candidate = None
+        self.stable_frames = 0
+        self.no_hand_frames = 0
+
         self.gesture_label.setText("Gesture: None")
         self.status_label.setText("Status: WAITING")
+        self.hand_count_label.setText("Hands detected: 0")
 
         self.add_log("Camera stopped.")
 
     def closeEvent(self, event):
+
         self.stop_camera()
         event.accept()
