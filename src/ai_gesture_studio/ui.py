@@ -1,35 +1,17 @@
 import sys
 import cv2
 import time
-import mediapipe as mp
 
-from pathlib import Path
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QLabel, QPushButton, QVBoxLayout,
-    QHBoxLayout, QFrame, QTextEdit
+    QHBoxLayout, QTextEdit
 )
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QImage, QPixmap
 
-from mediapipe.tasks import python
-from mediapipe.tasks.python import vision
-
 from gesture_recognizer import recognize_gesture
-
-
-# Project configuration
-MODEL_PATH = Path(__file__).resolve().parents[2] / "hand_landmarker.task"
-
-CONNECTIONS = [
-    (0, 1), (1, 2), (2, 3), (3, 4),
-    (0, 5), (5, 6), (6, 7), (7, 8),
-    (5, 9), (9, 10), (10, 11), (11, 12),
-    (9, 13), (13, 14), (14, 15), (15, 16),
-    (13, 17), (17, 18), (18, 19), (19, 20),
-    (0, 17)
-]
-
+from hand_tracker import HandTracker
 
 
 class GestureStudio(QMainWindow):
@@ -41,13 +23,13 @@ class GestureStudio(QMainWindow):
         self.setMinimumSize(950, 650)
 
         self.cap = None
-        self.detector = None
+        self.tracker = None
+
         self.current_gesture = "None"
         self.app_status = "WAITING"
 
         self.candidate = None
         self.stable_frames = 0
-        self.last_timestamp = -1
 
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_camera)
@@ -67,15 +49,15 @@ class GestureStudio(QMainWindow):
             "font-size: 28px; font-weight: bold; color: #55C2FF;"
         )
 
-        subtitle = QLabel("Real-Time Hand Tracking & Gesture Recognition")
+        subtitle = QLabel(
+            "Real-Time Hand Tracking & Gesture Recognition"
+        )
         subtitle.setStyleSheet("color: #AAAAAA; font-size: 13px;")
 
         main_layout.addWidget(title)
         main_layout.addWidget(subtitle)
 
         content = QHBoxLayout()
-
-        # Camera panel
         camera_panel = QVBoxLayout()
 
         self.camera_label = QLabel("Camera is stopped")
@@ -91,7 +73,6 @@ class GestureStudio(QMainWindow):
 
         camera_panel.addWidget(self.camera_label)
 
-        # Information panel
         info_panel = QVBoxLayout()
 
         self.gesture_label = QLabel("Gesture: None")
@@ -111,22 +92,14 @@ class GestureStudio(QMainWindow):
         self.log.setReadOnly(True)
         self.log.setPlaceholderText("Activity log...")
         self.log.setMaximumWidth(270)
-        self.log.setStyleSheet(
-            "background-color: #111827;"
-            "color: #D1D5DB;"
-            "border: 1px solid #334155;"
-            "border-radius: 8px;"
-        )
 
         info_panel.addWidget(QLabel("ACTIVITY LOG"))
         info_panel.addWidget(self.log)
 
         content.addLayout(camera_panel, 3)
         content.addLayout(info_panel, 1)
-
         main_layout.addLayout(content)
 
-        # Controls
         controls = QHBoxLayout()
 
         self.start_button = QPushButton("START CAMERA")
@@ -165,37 +138,18 @@ class GestureStudio(QMainWindow):
 
     def start_camera(self):
 
-        if not MODEL_PATH.exists():
-            self.add_log("ERROR: Hand model not found.")
-            return
-
         try:
-            base_options = python.BaseOptions(
-                model_asset_path=str(MODEL_PATH)
-            )
-
-            options = vision.HandLandmarkerOptions(
-                base_options=base_options,
-                running_mode=vision.RunningMode.VIDEO,
-                num_hands=2
-            )
-
-            self.detector = vision.HandLandmarker.create_from_options(
-                options
-            )
+            self.tracker = HandTracker()
 
             self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
 
             if not self.cap.isOpened():
-                self.add_log("ERROR: Camera could not open.")
-                self.stop_camera()
-                return
+                raise RuntimeError("Camera could not open.")
 
             self.current_gesture = "None"
             self.app_status = "WAITING"
             self.candidate = None
             self.stable_frames = 0
-            self.last_timestamp = -1
 
             self.timer.start(30)
 
@@ -210,7 +164,7 @@ class GestureStudio(QMainWindow):
 
     def update_camera(self):
 
-        if self.cap is None:
+        if self.cap is None or self.tracker is None:
             return
 
         ret, frame = self.cap.read()
@@ -222,49 +176,18 @@ class GestureStudio(QMainWindow):
 
         frame = cv2.flip(frame, 1)
 
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-        mp_image = mp.Image(
-            image_format=mp.ImageFormat.SRGB,
-            data=rgb
-        )
-
-        timestamp = time.monotonic_ns() // 1_000_000
-        self.last_timestamp = max(
-            timestamp, self.last_timestamp + 1
-        )
-
-        results = self.detector.detect_for_video(
-            mp_image, self.last_timestamp
-        )
+        results = self.tracker.process_frame(frame)
 
         detected = "None"
 
         if results.hand_landmarks:
 
             hand = results.hand_landmarks[0]
+
             detected = recognize_gesture(hand)
 
-            height, width, _ = frame.shape
-            points = []
+            self.tracker.draw_landmarks(frame, hand)
 
-            for landmark in hand:
-                x = int(landmark.x * width)
-                y = int(landmark.y * height)
-                points.append((x, y))
-
-            for start, end in CONNECTIONS:
-                cv2.line(
-                    frame, points[start], points[end],
-                    (0, 255, 0), 2
-                )
-
-            for point in points:
-                cv2.circle(
-                    frame, point, 5, (0, 0, 255), -1
-                )
-
-        # Gesture stabilization
         if detected == self.candidate:
             self.stable_frames += 1
         else:
@@ -336,9 +259,9 @@ class GestureStudio(QMainWindow):
             self.cap.release()
             self.cap = None
 
-        if self.detector is not None:
-            self.detector.close()
-            self.detector = None
+        if self.tracker is not None:
+            self.tracker.close()
+            self.tracker = None
 
         self.camera_label.clear()
         self.camera_label.setText("Camera is stopped")
@@ -357,13 +280,3 @@ class GestureStudio(QMainWindow):
     def closeEvent(self, event):
         self.stop_camera()
         event.accept()
-
-
-if __name__ == "__main__":
-
-    app = QApplication(sys.argv)
-
-    window = GestureStudio()
-    window.show()
-
-    sys.exit(app.exec())
