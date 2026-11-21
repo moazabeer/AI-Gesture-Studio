@@ -30,15 +30,24 @@ V1.0.0 - Initial Prototype
 
 ```text
 AI-Gesture-Studio/
+|
 ├── hand_landmarker.task
 ├── requirements.txt
 ├── README.md
-└── src/
-    └── ai_gesture_studio/
-        ├── main.py
-        ├── camera.py
-        ├── camera_view.py
-        └── ui.py
+├── .gitignore
+|
+├── src/
+|   └── ai_gesture_studio/
+|       ├── ui.py
+|       ├── camera.py
+|       ├── camera_view.py
+|       ├── gesture_recognizer.py
+|       └── hand_tracker.py
+|
+└── tests/
+    └── test_gestures.py
+
+
 ```
 
 ## Installation
