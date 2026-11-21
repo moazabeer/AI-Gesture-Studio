@@ -98,14 +98,20 @@ python src/ai_gesture_studio/main.py
 - Webcam
 - Windows (current camera configuration)
 
-## Future Development
+## Features
 
+- Real-time hand tracking using MediaPipe
+- Two-hand detection
+- Real-time gesture recognition
+- Open Palm, Fist, and Peace Sign recognition
 - Hand-controlled mouse movement
-- Pinch-to-click
-- Virtual drawing
-- Keyboard control
-- Additional gestures
-- Improved desktop interface
+- Adjustable cursor smoothing
+- Thumb-index pinch-to-click
+- Mouse enable/disable safety controls
+- Camera resolution configuration
+- PyQt6 desktop dashboard
+- Automated gesture and mouse-controller tests
+
 
 ## License
 
