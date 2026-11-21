@@ -42,7 +42,8 @@ AI-Gesture-Studio/
 |       ├── camera.py
 |       ├── camera_view.py
 |       ├── gesture_recognizer.py
-|       └── hand_tracker.py
+|       ├── hand_tracker.py
+|       └── mouse_controller.py
 |
 └── tests/
     └── test_gestures.py
